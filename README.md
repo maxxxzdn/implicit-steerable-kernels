@@ -13,7 +13,7 @@
 <li>
 <strong>Notebook demo:</strong>
 <a href="https://github.com/maxxxzdn/implicit-steerable-kernels/blob/main/demo.ipynb">
-    <img src="https://en.wikipedia.org/wiki/Project_Jupyter#/media/File:Jupyter_logo.svg" height="20">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/3/38/Jupyter_logo.svg" height="20" alt="Jupyter">
 </a>
 </li>
 <li>
