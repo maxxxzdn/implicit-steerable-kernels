@@ -39,8 +39,8 @@ class ImplicitPointConv(_RdPointConv):
         _filter = self.implicit_kernel(edge_delta, edge_attr)
         return torch.einsum('noi,ni->no', _filter, x_j)
     
-    def forward(self, x: GeometricTensor, idx_downsampled: torch.Tensor, edge_index: torch.Tensor, 
-                edge_delta: OptTensor, edge_attr: OptTensor = None, size: Size = None):
+    def forward(self, x: GeometricTensor, edge_index: torch.Tensor, edge_delta: OptTensor, 
+                idx_downsampled: torch.Tensor = None, edge_attr: OptTensor = None, size: Size = None):
                 
         assert isinstance(x, GeometricTensor)
         assert x.type == self.in_type

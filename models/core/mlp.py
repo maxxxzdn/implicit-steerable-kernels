@@ -27,15 +27,13 @@ class SONMLPTensor(nn.EquivariantModule):
             in_repr=in_repr, 
             out_repr=out_repr, 
             n_layers=mlp_kwargs['n_layers'], 
-            n_channels=mlp_kwargs['n_channels'], 
-            act_fn=mlp_kwargs['act_fn'], 
-            use_tp=mlp_kwargs['use_tp'])
+            n_channels=mlp_kwargs['n_channels'])
         self.out_type = self.mlp.out_type
         
         if initialize:
             self.initialize() 
   
-    def set_mlp(self, in_repr, out_repr, n_layers, n_channels, act_fn, use_tp):
+    def set_mlp(self, in_repr, out_repr, n_layers, n_channels):
         """
         Initializes the MLP that spits out a steerable filter.
         Args:
@@ -43,28 +41,17 @@ class SONMLPTensor(nn.EquivariantModule):
             out_repr (nn.FieldType): representation of the output field.
             n_layers (int): number of layers in the MLP.
             n_channels (int): number of channels in the MLP.
-            act_fn (str): activation function.
             use_tp (bool): whether to use tensor product layers.
         """
         mlp = nn.SequentialModule()
         tmp = out_repr.representations[0].tensor(in_repr.representations[0]) # ψ1 ⊗ ψ2
-        tmp_tp = out_repr.representations[0] # ψ1 ⊗ ψ2
         out_type = self.gspace.type(*[tmp] * (len(out_repr) * len(in_repr))) # ⊗^(c1*c2) ψ1 ⊗ ψ2
         
-        if use_tp:
-            hid_type = self.gspace.type(*[tmp])
-            in_tp = nn.TensorProductModule(self.in_type, hid_type, initialize = False)
-            mlp.append(in_tp)
-        else:
-            hid_type = self.in_type     
+        hid_type = self.in_type     
          
-        if act_fn == 'elu' and n_layers > 1:
+        if n_layers > 1:
             L = len(set(self.in_type.irreps)) - 1
             activation = get_elu(gspace=self.gspace, L=L, channels=n_channels)
-        elif act_fn == 'tp' and n_layers > 1:
-            activation = nn.TensorProductModule(hid_type, self.gspace.type(*[tmp_tp] * n_channels), initialize = False)
-        elif n_layers > 1:
-            raise ValueError('only ELU and TP are allowed.')
             
         for _ in range(n_layers-1):
             mlp.append(nn.Linear(hid_type, activation.in_type, initialize = False, bias=True))
