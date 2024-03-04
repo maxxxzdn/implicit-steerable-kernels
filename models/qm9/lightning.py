@@ -13,15 +13,15 @@ class QM9Regressor(pl.LightningModule):
     """
 
     def __init__(
-        self, 
-        model: torch.nn.Module, 
-        lr: float, 
-        target_mean: float, 
-        target_std: float, 
-        pos_mean: float, 
+        self,
+        model: torch.nn.Module,
+        lr: float,
+        target_mean: float,
+        target_std: float,
+        pos_mean: float,
         pos_std: float,
         path_to_state_dict: str = None,
-        verbose: bool = False
+        verbose: bool = False,
     ):
         """
         Initialize the QM9Regressor module.
@@ -49,7 +49,7 @@ class QM9Regressor(pl.LightningModule):
         self.pos_std = pos_std
         self.path = path_to_state_dict
         self.verbose = verbose
-                
+
     def forward(self, data: Data) -> torch.Tensor:
         """
         Forward pass of the model.
@@ -62,7 +62,7 @@ class QM9Regressor(pl.LightningModule):
         """
         pos_in = (data.pos - self.pos_mean) / self.pos_std
         return self.model(data.x, pos_in, data.edge_index, data.edge_attr, data.batch)
-    
+
     def _step(self, data: Data, stage: str) -> torch.Tensor:
         """
         A helper function for training, validation, and test steps.
@@ -79,14 +79,14 @@ class QM9Regressor(pl.LightningModule):
         target = (data.y - self.target_mean) / self.target_std
         loss = self.loss(pred, target)
 
-        metric = getattr(self, f'{stage}_metric')
+        metric = getattr(self, f"{stage}_metric")
         metric((pred * self.target_std + self.target_mean) * 1000, data.y * 1000)
         self.log_dict(
-            {
-                f'{stage}/metric': metric,
-                f'{stage}/loss': loss.item()
-            },
-            on_step=False, on_epoch=True, batch_size=batch_size, prog_bar=self.verbose
+            {f"{stage}/metric": metric, f"{stage}/loss": loss.item()},
+            on_step=False,
+            on_epoch=True,
+            batch_size=batch_size,
+            prog_bar=self.verbose,
         )
         return loss
 
@@ -101,8 +101,8 @@ class QM9Regressor(pl.LightningModule):
         Returns:
             torch.Tensor: Computed loss for the batch.
         """
-        return self._step(data, 'train')
-    
+        return self._step(data, "train")
+
     def validation_step(self, data: Data, batch_idx: int):
         """
         Validation step for the model.
@@ -114,7 +114,7 @@ class QM9Regressor(pl.LightningModule):
         Returns:
             torch.Tensor: Computed loss for the batch.
         """
-        return self._step(data, 'val')
+        return self._step(data, "val")
 
     def test_step(self, data: Data, batch_idx: int):
         """
@@ -127,8 +127,8 @@ class QM9Regressor(pl.LightningModule):
         Returns:
             torch.Tensor: Computed loss for the batch.
         """
-        return self._step(data, 'test')
-    
+        return self._step(data, "test")
+
     def configure_optimizers(self):
         """
         Configures optimizers and learning rate schedulers.
@@ -139,10 +139,15 @@ class QM9Regressor(pl.LightningModule):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-8)
         if self.path is not None:
             try:
-                optimizer.load_state_dict(torch.load(self.path)['optimizer_state_dict'])
+                optimizer.load_state_dict(torch.load(self.path)["optimizer_state_dict"])
             except Exception as e:
                 if self.verbose:
                     print(f"Failed to load optimizer state: {e}")
 
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[25, 50, 75, 100, 125], gamma=0.5)
-        return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "monitor": "train/metric"}}
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer, milestones=[25, 50, 75, 100, 125], gamma=0.5
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {"scheduler": scheduler, "monitor": "train/metric"},
+        }

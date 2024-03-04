@@ -1,110 +1,97 @@
-import random
-import torch
-import numpy as np
-from escnn import nn, group, gspaces
+from escnn import nn, gspaces
 
-from utils.utils import get_elu
+from utils.escnn_utils import repr_max_freq
+from utils.nonlinearities import get_elu
 
 
-class SONMLPTensor(nn.EquivariantModule):
-    def __init__(self, in_type: nn.FieldType, in_repr: nn.FieldType, out_repr: nn.FieldType, initialize: bool, **mlp_kwargs):
+class MLP(nn.EquivariantModule):
+    def __init__(
+        self,
+        in_type: nn.FieldType,
+        out_type: nn.FieldType,
+        n_layers: int = 2,
+        n_channels: int = 16,
+        init_scheme: str = "deltaorthonormal",
+        norm: bool = True,
+    ):
         """
-        MLP that is equivariant to the group SO(N). It takes the coordinates of a point in the 3D space as input.
-        Note: we assume that in_repr and out_repr contain c1, c2 copies of the same representations (ψ1, ψ2 respectively).
+        MLP that is equivariant to subgroups of O(N).
+
         Args:
             in_type (nn.FieldType): type of the input field.
-            in_repr (nn.FieldType): representation of the input field.
-            out_repr (nn.FieldType): representation of the output field.
-            initialize (bool): whether to initialize the MLP.
-            **mlp_kwargs (dict): keyword arguments for the MLP.
+            out_type (nn.FieldType): type of the output field.
+            n_layers (int): number of layers in the MLP.
+            n_channels (int): number of hidden channels in the MLP.
+            initialize (bool): whether to initialize the MLP
+                - warning: might take a while for large MLPs.
         """
         super().__init__()
-        assert in_repr.uniform and out_repr.uniform
         self.G = in_type.fibergroup
         self.gspace = gspaces.no_base_space(self.G)
         self.in_type = in_type
-        self.mlp = self.set_mlp(
-            in_repr=in_repr, 
-            out_repr=out_repr, 
-            n_layers=mlp_kwargs['n_layers'], 
-            n_channels=mlp_kwargs['n_channels'])
-        self.out_type = self.mlp.out_type
-        
-        if initialize:
-            self.initialize() 
-  
-    def set_mlp(self, in_repr, out_repr, n_layers, n_channels):
-        """
-        Initializes the MLP that spits out a steerable filter.
-        Args:
-            in_repr (nn.FieldType): representation of the input field.
-            out_repr (nn.FieldType): representation of the output field.
-            n_layers (int): number of layers in the MLP.
-            n_channels (int): number of channels in the MLP.
-            use_tp (bool): whether to use tensor product layers.
-        """
-        mlp = nn.SequentialModule()
-        tmp = out_repr.representations[0].tensor(in_repr.representations[0]) # ψ1 ⊗ ψ2
-        out_type = self.gspace.type(*[tmp] * (len(out_repr) * len(in_repr))) # ⊗^(c1*c2) ψ1 ⊗ ψ2
-        
-        hid_type = self.in_type     
-         
+        self.out_type = out_type
+
+        # INITIALIZATION
+        self.mlp = nn.SequentialModule()
+        hid_type = in_type
+
         if n_layers > 1:
-            L = len(set(self.in_type.irreps)) - 1
-            activation = get_elu(gspace=self.gspace, L=L, channels=n_channels)
-            
-        for _ in range(n_layers-1):
-            mlp.append(nn.Linear(hid_type, activation.in_type, initialize = False, bias=True))
-            mlp.append(activation)
+            L = (
+                repr_max_freq(out_type.representations) + 1
+            )  # bandlimit angular frequency as the maximum frequency of the input representation
+            activation = get_elu(
+                gspace=self.gspace, L=L, channels=n_channels
+            )  # ELU-like activation function
+
+        for _ in range(n_layers - 1):
+            self.mlp.append(
+                nn.Linear(hid_type, activation.in_type, bias=True, initialize=False)
+            )
+            self.mlp.append(activation)
+
+            if norm:
+                self.mlp.append(nn.IIDBatchNorm1d(activation.out_type))
+
             hid_type = activation.in_type
-        
-        mlp.append(nn.Linear(hid_type, out_type, initialize=False, bias=True))
-        
-        return mlp
-    
-    def initialize(self):
+
+        self.mlp.append(nn.Linear(hid_type, out_type, bias=True, initialize=False))
+
+        self.initialize(init_scheme)
+
+    def initialize(self, init_scheme):
         """
-        Initializes each linear map using delta-orthonormal initialization scheme.
+        Initializes each linear map using either delta-orthonormal or generalized He initialization scheme.
         More details: https://quva-lab.github.io/escnn/api/escnn.nn.html#module-escnn.nn.init
+
+        Args:
+            init_scheme (str): initialization scheme name.
+                - 'deltaorthonormal': delta-orthonormal initialization scheme.
+                - 'he': generalized He initialization scheme.
         """
         for i in range(len(self.mlp)):
-            try:
-                nn.init.deltaorthonormal_init(self.mlp[i].weights.data, self.mlp[i].basisexpansion)
-                #nn.init.generalized_he_init(self.mlp[i].weights.data, self.mlp[i].basisexpansion)
-            except:
-                pass
-     
+            if self.mlp[i].__class__.__name__ == "Linear":
+                if init_scheme == "deltaorthonormal":
+                    nn.init.deltaorthonormal_init(
+                        self.mlp[i].weights.data, self.mlp[i].basisexpansion
+                    )
+                else:
+                    nn.init.generalized_he_init(
+                        self.mlp[i].weights.data, self.mlp[i].basisexpansion
+                    )
+
     def forward(self, x: nn.GeometricTensor):
+        """
+        Forward pass of the MLP.
+
+        Args:
+            x (nn.GeometricTensor): input field with type self.in_type.
+
+        Returns:
+            nn.GeometricTensor: output field with type self.out_type.
+        """
         assert isinstance(x, nn.GeometricTensor)
         assert x.type == self.in_type
         return self.mlp(x)
-    
-    def evaluate_output_shape(self, input_shape: tuple):
-        shape = list(input_shape)
-        assert len(shape) == 2, shape
-        assert shape[1] == self.in_type.size, shape
-        shape[1] = self.out_type.size
-        return shape
-    
-    def assert_equivariance(self, atol: float = 5e-5, rtol: float = 1e-5):
-        """
-        Asserts the equivariance of the MLP to randomly sampled group elements.
-        Args:
-            atol (float): absolute tolerance.
-            rtol (float): relative tolerance.
-        """
-        device = next(self.parameters()).device
-        # random input coordinates uniformly sampled from [-1,1]^3
-        x = 2*torch.rand(100, self.in_type.size) - 1
-        x = nn.GeometricTensor(x.to(device), self.in_type)
-        for _ in range(10):
-            with torch.no_grad():
-                # we check the equivarince for a randomly chosen field due to the high computation cost
-                field_id = random.choice(range(len(self.out_type)))
-                g_el = self.G.sample()
-                # g @ (MLP(x) [:, random field])
-                out1 = self(x)[:, field_id].transform(g_el).tensor
-                # MLP(g @ x) [:, random field]
-                out2 = self(x.transform(g_el))[:, field_id].tensor
-                # assert that g @ MLP(x) ≈ MLP(g @ x) w.r.t L1 distance 
-                assert torch.allclose(out1, out2, atol=atol, rtol=rtol), print(torch.max(out1-out2))
+
+    def evaluate_output_shape(self):
+        pass

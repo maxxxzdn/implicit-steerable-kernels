@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from escnn.nn import FieldType
 from escnn.nn import GeometricTensor
 from escnn.group import Representation
-from escnn.kernels import KernelBasis, EmptyBasisException
+from escnn.kernels import KernelBasis
 from escnn.gspaces import *
 
 from escnn.nn.modules.equivariant_module import EquivariantModule
@@ -19,7 +19,6 @@ from torch_geometric.typing import OptTensor, Size
 
 from torch.nn import Parameter
 import numpy as np
-import math
 
 
 __all__ = ["_RdPointConv"]
@@ -28,18 +27,23 @@ OptPairGeometricTensor = Tuple[GeometricTensor, Optional[GeometricTensor]]
 
 
 class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
-    
-    def __init__(self,
-                 in_type: FieldType,
-                 out_type: FieldType,
-                 d: int,
-                 groups: int = 1,
-                 bias: bool = True,
-                 basis_filter: Callable[[dict], bool] = None,
-                 recompute: bool = False,
-                 use_implicit: bool = False,
-                 ):
+    """
+    _RdPointConv that supports implicit kernels.
 
+    See https://quva-lab.github.io/escnn/_modules/escnn/nn/modules/pointconv/rd_point_convolution.html#_RdPointConv for native implementation.
+    """
+
+    def __init__(
+        self,
+        in_type: FieldType,
+        out_type: FieldType,
+        d: int,
+        groups: int = 1,
+        bias: bool = True,
+        basis_filter: Callable[[dict], bool] = None,
+        recompute: bool = False,
+        use_implicit: bool = False,
+    ):
         r"""
 
         Abstract class which implements a general G-steerable convolution, mapping between the input and output
@@ -117,7 +121,7 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
         assert isinstance(in_type.gspace, GSpace)
         assert d >= in_type.gspace.dimensionality
 
-        super(_RdPointConv, self).__init__(aggr='mean')
+        super(_RdPointConv, self).__init__(aggr="add")
 
         self.d = d
         self.space = in_type.gspace
@@ -125,7 +129,7 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
         self.out_type = out_type
 
         assert self.space.dimensionality == self.d
-        
+
         self.groups = groups
 
         if groups > 1:
@@ -135,51 +139,59 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
             assert len(out_type) % groups == 0
             in_size = len(in_type) // groups
             out_size = len(out_type) // groups
-            
+
             # then, check that all groups are equal to each other, i.e. have the same types in the same order
-            assert all(in_type.representations[i] == in_type.representations[i % in_size] for i in range(len(in_type)))
-            assert all(out_type.representations[i] == out_type.representations[i % out_size] for i in range(len(out_type)))
-            
+            assert all(
+                in_type.representations[i] == in_type.representations[i % in_size]
+                for i in range(len(in_type))
+            )
+            assert all(
+                out_type.representations[i] == out_type.representations[i % out_size]
+                for i in range(len(out_type))
+            )
+
             # finally, retrieve the type associated to a single group in input.
             # this type will be used to build a smaller kernel basis and a smaller filter
             # as in PyTorch, to build a filter for grouped convolution, we build a filter which maps from one input
             # group to all output groups. Then, PyTorch's standard convolution routine interpret this filter as `groups`
             # different filters, each mapping an input group to an output group.
             in_type = in_type.index_select(list(range(in_size)))
-        
+
         if bias:
             # bias can be applied only to trivial irreps inside the representation
             # to apply bias to a field we learn a bias for each trivial irreps it contains
             # and, then, we transform it with the change of basis matrix to be able to apply it to the whole field
             # this is equivalent to transform the field to its irreps through the inverse change of basis,
             # sum the bias only to the trivial irrep and then map it back with the change of basis
-            
+
             # count the number of trivial irreps
             trivials = 0
             for r in self.out_type:
                 for irr in r.irreps:
                     if self.out_type.fibergroup.irrep(*irr).is_trivial():
                         trivials += 1
-            
+
             # if there is at least 1 trivial irrep
             if trivials > 0:
-                
+
                 # matrix containing the columns of the change of basis which map from the trivial irreps to the
                 # field representations. This matrix allows us to map the bias defined only over the trivial irreps
                 # to a bias for the whole field more efficiently
                 bias_expansion = torch.zeros(self.out_type.size, trivials)
-                
+
                 p, c = 0, 0
                 for r in self.out_type:
                     pi = 0
                     for irr in r.irreps:
                         irr = self.out_type.fibergroup.irrep(*irr)
                         if irr.is_trivial():
-                            bias_expansion[p:p+r.size, c] = torch.tensor(r.change_of_basis[:, pi])
+                            bias_expansion[p : p + r.size, c] = torch.tensor(
+                                r.change_of_basis[:, pi]
+                            )
                             c += 1
                         pi += irr.size
                     p += r.size
-                
+
                 self.register_buffer("bias_expansion", bias_expansion)
                 self.bias = Parameter(torch.zeros(trivials), requires_grad=True)
                 self.register_buffer("expanded_bias", torch.zeros(out_type.size))
@@ -192,26 +204,35 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
 
         # TODO support `groups` arg for conv
         if groups != 1:
-            raise NotImplementedError(f'`groups !=1` not supported yet!')
+            raise NotImplementedError(f"`groups !=1` not supported yet!")
 
         # BlocksBasisSampler: submodule which takes care of building the filter
         if not use_implicit:
-            self._basissampler = BlocksBasisSampler(in_type.representations, out_type.representations,
-                                                        self._build_kernel_basis,
-                                                        basis_filter=basis_filter,
-                                                        recompute=recompute)
+            self._basissampler = BlocksBasisSampler(
+                in_type.representations,
+                out_type.representations,
+                self._build_kernel_basis,
+                basis_filter=basis_filter,
+                recompute=recompute,
+            )
 
             if self.basissampler.dimension() == 0:
-                raise ValueError('''
+                raise ValueError(
+                    """
                     The basis for the steerable filter is empty!
                     Tune the `frequencies_cutoff`, `kernel_size`, `rings` or `basis_filter` parameters to allow
                     for a larger basis.
-                ''')
+                """
+                )
 
-            self.weights = Parameter(torch.zeros(self.basissampler.dimension()), requires_grad=True)
+            self.weights = Parameter(
+                torch.zeros(self.basissampler.dimension()), requires_grad=True
+            )
 
     @abstractmethod
-    def _build_kernel_basis(self, in_repr: Representation, out_repr: Representation) -> KernelBasis:
+    def _build_kernel_basis(
+        self, in_repr: Representation, out_repr: Representation
+    ) -> KernelBasis:
         raise NotImplementedError
 
     @property
@@ -258,7 +279,9 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
 
         return _bias
 
-    def expand_filter(self, points: Union[torch.Tensor, Dict[Tuple, torch.Tensor]]) -> torch.Tensor:
+    def expand_filter(
+        self, points: Union[torch.Tensor, Dict[Tuple, torch.Tensor]]
+    ) -> torch.Tensor:
         r"""
 
         Expand the filter in terms of :class:`~escnn.nn._RdPointConv.weights`.
@@ -270,7 +293,9 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
 
         return self.basissampler(self.weights, points)
 
-    def expand_parameters(self, points: Union[torch.Tensor, Dict[Tuple, torch.Tensor]]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def expand_parameters(
+        self, points: Union[torch.Tensor, Dict[Tuple, torch.Tensor]]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         r"""
 
         Expand the filter in terms of the :attr:`~escnn.nn._RdConv.weights` and the
@@ -286,7 +311,13 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
 
         return _filter, _bias
 
-    def forward(self, x: Union[GeometricTensor, OptPairGeometricTensor], edge_index: torch.Tensor, edge_delta: OptTensor = None, size: Size = None):
+    def forward(
+        self,
+        x: Union[GeometricTensor, OptPairGeometricTensor],
+        edge_index: torch.Tensor,
+        edge_delta: OptTensor = None,
+        size: Size = None,
+    ):
         r"""
         Convolve the input with the expanded filter and bias.
 
@@ -327,7 +358,7 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
         """
         if isinstance(x, GeometricTensor):
             x: OptPairTensor = (x, x)
-        
+
         assert isinstance(x, tuple)
         assert isinstance(x[0], GeometricTensor)
         assert isinstance(x[1], GeometricTensor)
@@ -343,7 +374,9 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
             row, cols = edge_index
             edge_delta = pos_j[row] - pos_i[cols]
 
-        out = self.propagate(edge_index, x=(x[0].tensor, x[1].tensor), edge_delta=edge_delta, size=size)
+        out = self.propagate(
+            edge_index, x=(x[0].tensor, x[1].tensor), edge_delta=edge_delta, size=size
+        )
 
         if not self.training:
             _bias = self.expanded_bias
@@ -355,7 +388,7 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
             out += _bias
 
         out = GeometricTensor(out, self.out_type, coords=x[1].coords)
-        
+
         return out
 
     def message(self, x_j: torch.Tensor, edge_delta: torch.Tensor) -> torch.Tensor:
@@ -418,70 +451,78 @@ class _RdPointConv(torch_geometric.nn.MessagePassing, EquivariantModule, ABC):
         extra_lines = []
         extra_repr = self.extra_repr()
         if extra_repr:
-            extra_lines = extra_repr.split('\n')
+            extra_lines = extra_repr.split("\n")
 
-        main_str = self._get_name() + '('
+        main_str = self._get_name() + "("
         if len(extra_lines) == 1:
             main_str += extra_lines[0]
         else:
-            main_str += '\n  ' + '\n  '.join(extra_lines) + '\n'
+            main_str += "\n  " + "\n  ".join(extra_lines) + "\n"
 
-        main_str += ')'
+        main_str += ")"
         return main_str
 
     def extra_repr(self):
-        s = ('{in_type}, {out_type}')
+        s = "{in_type}, {out_type}"
         if self.groups != 1:
-            s += ', groups={groups}'
+            s += ", groups={groups}"
         if self.bias is None:
-            s += ', bias=False'
+            s += ", bias=False"
         return s.format(**self.__dict__)
 
-    def check_equivariance(self, atol: float = 1e-5, rtol: float = 1e-6, assertion: bool = True, verbose: bool = True):
-    
+    def check_equivariance(
+        self,
+        atol: float = 1e-5,
+        rtol: float = 1e-6,
+        assertion: bool = True,
+        verbose: bool = True,
+    ):
+
         # np.set_printoptions(precision=5, threshold=30 *self.in_type.size**2, suppress=False, linewidth=30 *self.in_type.size**2)
-    
+
         P = 30
-    
+
         pos = torch.randn(P, self.d)
         x = torch.randn(P, self.in_type.size)
         x = GeometricTensor(x, self.in_type, pos)
-    
+
         distance = torch.norm(pos.unsqueeze(1) - pos, dim=2, keepdim=False)
-    
-        thr = sorted(distance.view(-1).tolist())[int(P**2//16)]
+
+        thr = sorted(distance.view(-1).tolist())[int(P**2 // 16)]
         edge_index = torch.nonzero(distance < thr).T.contiguous()
 
         errors = []
-    
+
         for el in self.space.testing_elements:
-        
+
             out1 = self(x, edge_index).transform(el).tensor.detach().numpy()
             out2 = self(x.transform(el), edge_index).tensor.detach().numpy()
-        
+
             errs = np.abs(out1 - out2)
-        
+
             esum = np.maximum(np.abs(out1), np.abs(out2))
             esum[esum == 0.0] = 1
-        
+
             relerr = errs / esum
-        
+
             # if verbose:
             #     print(el)
             #     print(relerr.max(), relerr.mean(), relerr.var(), errs.max(), errs.mean(), errs.var())
-        
+
             tol = rtol * esum + atol
-        
+
             if np.any(errs > tol) and verbose:
                 print(out1[errs > tol])
                 print(out2[errs > tol])
                 print(tol[errs > tol])
-        
+
             if assertion:
                 assert np.all(
-                    errs < tol), 'The error found during equivariance check with element "{}" is too high: max = {}, mean = {} var ={}'.format(
-                    el, errs.max(), errs.mean(), errs.var())
-        
+                    errs < tol
+                ), 'The error found during equivariance check with element "{}" is too high: max = {}, mean = {} var ={}'.format(
+                    el, errs.max(), errs.mean(), errs.var()
+                )
+
             errors.append((el, errs.mean()))
-    
+
         return errors
