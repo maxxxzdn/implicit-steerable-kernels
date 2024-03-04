@@ -1,0 +1,4 @@
+.conda/
+__pycache__/
+datasets/qm9/
+lightning_logs/
