@@ -8,8 +8,7 @@
 
 <b> Authors: </b> Maksim Zhdanov, Nico Hoffmann, Gabriele Cesa
 
-[ArXiv](https://arxiv.org/abs/2212.06096) | [Blog post](https://maxxxzdn.github.io/blog/implicit_kernels.html) | [Examples](/examples)
-
+[ArXiv](https://arxiv.org/abs/2212.06096) | [Blog post](https://maxxxzdn.github.io/blog/implicit_kernels.html) | [Examples](/examples) | [Google Colab](https://colab.research.google.com/drive/1mE_9GRWdhLi8KD6phAc0DPcFOec-b-8Y?usp=sharing)
 
 </div>
 
