@@ -1,18 +1,29 @@
-<h1 align="center">Implicit Convolutional Kernels for Steerable CNNs (NeurIPS 2023)</h1>
+<div align="center">
 
 <p align="center">
-  <a href="https://arxiv.org/abs/2212.06096"><img src="assets/approach.gif" alt="Figure 1"></a>
+  <a href="https://arxiv.org/abs/2212.06096"><img src="assets/approach.gif" alt="Figure 1" width="60%"></a>
 </p>
 
-<p align="center">
-  <b>Authors:</b> Maksim Zhdanov, Nico Hoffmann, Gabriele Cesa
-</p>
+<h3>Implicit Convolutional Kernels for Steerable CNNs (NeurIPS 2023) </h3>
 
-<p align="center">
-  <a href="https://arxiv.org/abs/2212.06096"><img src="https://upload.wikimedia.org/wikipedia/commons/b/bc/ArXiv_logo_2022.svg" height="20" alt="arXiv"></a> ·
-  <a href="https://github.com/maxxxzdn/implicit-steerable-kernels/blob/main/demo.ipynb"><img src="https://upload.wikimedia.org/wikipedia/commons/3/38/Jupyter_logo.svg" height="20" alt="Jupyter Notebook Demo"></a> ·
-  <a href="https://maxxxzdn.github.io/blog/implicit_kernels.html"><img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg" height="20" alt="Blog Post"></a>
-</p>
+<b> Authors: </b> Maksim Zhdanov, Nico Hoffmann, Gabriele Cesa
+
+[ArXiv](https://arxiv.org/abs/2212.06096) | [Blog post](https://maxxxzdn.github.io/blog/implicit_kernels.html) | [Examples](/examples)
+
+
+</div>
+
+---
+
+✨ How can we simplify designing equivariant neural networks and make them more expressive? By using implicit parameterization of convolutional kernels! ✨ 
+
+- It is theoretically guaranteed that equivariance of the parameterization yields equivariance of the convolutional layer.
+
+- It is possible now to condition convolutional kernels on arbitrary attributes, improving the expressiveness of the model.
+
+- In this repository, we provide implementation for any subgroup of the Euclidean group $E(n)$.
+
+- **New** 🚀: if you are interested in a more general case of $E(p,q)$, e.g. spacetime isometries, make sure to check this [repository](https://github.com/maxxxzdn/clifford-group-equivariant-cnns).
 
 ## Abstract
 
