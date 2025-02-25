@@ -84,7 +84,7 @@ class ImplicitKernel(torch.nn.Module):
             conv_out_type.representations
         )
         self.in_size = conv_in_type.representations[0].size
-        self.out_size = conv_in_type.representations[0].size
+        self.out_size = conv_out_type.representations[0].size
 
         # normalization factor
         self.factor = 1 / math.sqrt(self.c_out)
